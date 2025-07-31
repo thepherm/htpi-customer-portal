@@ -1,46 +1,234 @@
-# Getting Started with Create React App
+# HTPI Customer Portal
 
-This project was bootstrapped with [Create React App](https://github.com/facebook/create-react-app).
+Modern React-based customer portal for the HTPI healthcare insurance claim processing system.
 
-## Available Scripts
+## Overview
 
-In the project directory, you can run:
+The HTPI Customer Portal provides healthcare providers and billing staff with a user-friendly interface to:
 
-### `npm start`
+- Manage patient information
+- Verify insurance coverage
+- Create and submit HCFA 1500 forms
+- Track claim status
+- View payment history
+- Generate reports
 
-Runs the app in the development mode.\
-Open [http://localhost:3000](http://localhost:3000) to view it in the browser.
+## Features
 
-The page will reload if you make edits.\
-You will also see any lint errors in the console.
+- **Real-time Updates**: Socket.IO integration for instant updates
+- **Responsive Design**: Works on desktop, tablet, and mobile devices
+- **Role-based Access**: Different views for providers, billers, and staff
+- **Secure Authentication**: JWT-based authentication
+- **Modern UI**: Material-UI components for a clean, professional interface
 
-### `npm test`
+## Tech Stack
 
-Launches the test runner in the interactive watch mode.\
-See the section about [running tests](https://facebook.github.io/create-react-app/docs/running-tests) for more information.
+- React 18 with TypeScript
+- Material-UI v5 for UI components
+- Socket.IO Client for real-time communication
+- React Query for server state management
+- React Router v6 for navigation
+- React Hook Form for form handling
+- Date-fns for date manipulation
 
-### `npm run build`
+## Prerequisites
 
-Builds the app for production to the `build` folder.\
-It correctly bundles React in production mode and optimizes the build for the best performance.
+- Node.js 16+
+- npm or yarn
+- HTPI Gateway Service running
 
-The build is minified and the filenames include the hashes.\
-Your app is ready to be deployed!
+## Installation
 
-See the section about [deployment](https://facebook.github.io/create-react-app/docs/deployment) for more information.
+1. Clone the repository:
+```bash
+git clone https://github.com/yourusername/htpi-customer-portal.git
+cd htpi-customer-portal
+```
 
-### `npm run eject`
+2. Install dependencies:
+```bash
+npm install
+```
 
-**Note: this is a one-way operation. Once you `eject`, you can’t go back!**
+3. Create environment file:
+```bash
+cp .env.example .env
+```
 
-If you aren’t satisfied with the build tool and configuration choices, you can `eject` at any time. This command will remove the single build dependency from your project.
+4. Update `.env` with your configuration:
+```env
+REACT_APP_GATEWAY_URL=http://localhost:8000
+REACT_APP_API_URL=http://localhost:8000
+```
 
-Instead, it will copy all the configuration files and the transitive dependencies (webpack, Babel, ESLint, etc) right into your project so you have full control over them. All of the commands except `eject` will still work, but they will point to the copied scripts so you can tweak them. At this point you’re on your own.
+## Development
 
-You don’t have to ever use `eject`. The curated feature set is suitable for small and middle deployments, and you shouldn’t feel obligated to use this feature. However we understand that this tool wouldn’t be useful if you couldn’t customize it when you are ready for it.
+Start the development server:
+```bash
+npm start
+```
 
-## Learn More
+The app will open at [http://localhost:3000](http://localhost:3000)
 
-You can learn more in the [Create React App documentation](https://facebook.github.io/create-react-app/docs/getting-started).
+## Building for Production
 
-To learn React, check out the [React documentation](https://reactjs.org/).
+```bash
+npm run build
+```
+
+This creates an optimized production build in the `build` folder.
+
+## Deployment
+
+### Deploy to Vercel
+```bash
+npm install -g vercel
+vercel
+```
+
+### Deploy to Netlify
+```bash
+npm install -g netlify-cli
+netlify deploy --prod --dir=build
+```
+
+### Deploy to Railway
+```bash
+railway login
+railway link
+railway up
+```
+
+## Project Structure
+
+```
+src/
+├── components/       # Reusable UI components
+├── contexts/        # React contexts (Auth, etc.)
+├── hooks/           # Custom React hooks
+├── pages/           # Page components
+├── services/        # API and Socket.IO services
+├── types/           # TypeScript type definitions
+├── utils/           # Utility functions
+├── App.tsx          # Main app component
+└── index.tsx        # Entry point
+```
+
+## Available Pages
+
+- **/login** - User authentication
+- **/dashboard** - Main dashboard with statistics
+- **/patients** - Patient management
+- **/patients/new** - Create new patient
+- **/patients/:id** - View patient details
+- **/patients/:id/edit** - Edit patient
+- **/insurance** - Insurance management
+- **/forms** - HCFA form management
+- **/forms/new** - Create new form
+- **/forms/:id** - View/edit form
+- **/claims** - Claim tracking
+- **/claims/:id** - Claim details
+- **/reports** - Reporting dashboard
+- **/settings** - User settings
+- **/profile** - User profile
+
+## Authentication
+
+The portal uses JWT tokens for authentication:
+
+1. User logs in with email/password
+2. Receives JWT token from gateway service
+3. Token stored in localStorage
+4. Token sent with all API requests
+5. Token refreshed automatically
+
+## Real-time Features
+
+Socket.IO provides real-time updates for:
+
+- New patient registrations
+- Insurance verification results
+- Claim status changes
+- Payment notifications
+- System alerts
+
+## State Management
+
+- **React Query**: Server state (patients, claims, etc.)
+- **React Context**: Client state (auth, UI preferences)
+- **Local Storage**: Auth tokens, user preferences
+
+## Error Handling
+
+- Network errors display user-friendly messages
+- Form validation with helpful error messages
+- Automatic retry for failed requests
+- Offline detection and queuing
+
+## Testing
+
+Run tests:
+```bash
+npm test
+```
+
+Run tests with coverage:
+```bash
+npm test -- --coverage
+```
+
+## Code Quality
+
+Lint code:
+```bash
+npm run lint
+```
+
+Format code:
+```bash
+npm run format
+```
+
+## Performance Optimization
+
+- Code splitting for faster initial load
+- Lazy loading of routes
+- Image optimization
+- Memoization of expensive operations
+- Virtual scrolling for large lists
+
+## Browser Support
+
+- Chrome (latest)
+- Firefox (latest)
+- Safari (latest)
+- Edge (latest)
+
+## Troubleshooting
+
+### Connection Issues
+- Verify gateway service is running
+- Check REACT_APP_GATEWAY_URL in .env
+- Look for CORS errors in console
+
+### Authentication Problems
+- Clear localStorage
+- Check token expiration
+- Verify JWT secret matches gateway
+
+### Build Errors
+- Delete node_modules and reinstall
+- Clear npm/yarn cache
+- Check for TypeScript errors
+
+## Contributing
+
+1. Fork the repository
+2. Create feature branch
+3. Commit changes
+4. Push to branch
+5. Create pull request
+
+## License
+
+MIT
