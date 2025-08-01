@@ -1,0 +1,274 @@
+{% extends "layout.html" %}
+
+{% block title %}Dashboard - HTPI Customer Portal{% endblock %}
+
+{% block page_content %}
+<h1 class="text-2xl font-semibold text-gray-900 mb-8">Dashboard</h1>
+
+<!-- Stats Cards -->
+<div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
+    <div class="bg-white overflow-hidden shadow rounded-lg">
+        <div class="p-5">
+            <div class="flex items-center">
+                <div class="flex-shrink-0">
+                    <i class="fas fa-users text-3xl text-indigo-600"></i>
+                </div>
+                <div class="ml-5 w-0 flex-1">
+                    <dl>
+                        <dt class="text-sm font-medium text-gray-500 truncate">Active Patients</dt>
+                        <dd class="text-lg font-medium text-gray-900" id="activePatients">
+                            <i class="fas fa-circle-notch fa-spin text-gray-400"></i>
+                        </dd>
+                    </dl>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="bg-white overflow-hidden shadow rounded-lg">
+        <div class="p-5">
+            <div class="flex items-center">
+                <div class="flex-shrink-0">
+                    <i class="fas fa-calendar text-3xl text-green-600"></i>
+                </div>
+                <div class="ml-5 w-0 flex-1">
+                    <dl>
+                        <dt class="text-sm font-medium text-gray-500 truncate">Appointments Today</dt>
+                        <dd class="text-lg font-medium text-gray-900" id="appointmentsToday">
+                            <i class="fas fa-circle-notch fa-spin text-gray-400"></i>
+                        </dd>
+                    </dl>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="bg-white overflow-hidden shadow rounded-lg">
+        <div class="p-5">
+            <div class="flex items-center">
+                <div class="flex-shrink-0">
+                    <i class="fas fa-file-medical text-3xl text-yellow-600"></i>
+                </div>
+                <div class="ml-5 w-0 flex-1">
+                    <dl>
+                        <dt class="text-sm font-medium text-gray-500 truncate">Pending Claims</dt>
+                        <dd class="text-lg font-medium text-gray-900" id="pendingClaims">
+                            <i class="fas fa-circle-notch fa-spin text-gray-400"></i>
+                        </dd>
+                    </dl>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="bg-white overflow-hidden shadow rounded-lg">
+        <div class="p-5">
+            <div class="flex items-center">
+                <div class="flex-shrink-0">
+                    <i class="fas fa-check-circle text-3xl text-green-600"></i>
+                </div>
+                <div class="ml-5 w-0 flex-1">
+                    <dl>
+                        <dt class="text-sm font-medium text-gray-500 truncate">Completed Today</dt>
+                        <dd class="text-lg font-medium text-gray-900" id="completedToday">
+                            <i class="fas fa-circle-notch fa-spin text-gray-400"></i>
+                        </dd>
+                    </dl>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Recent Activity -->
+<div class="bg-white shadow rounded-lg">
+    <div class="px-4 py-5 sm:p-6">
+        <h3 class="text-lg leading-6 font-medium text-gray-900 mb-4">Recent Activity</h3>
+        <div class="flow-root">
+            <ul class="-my-5 divide-y divide-gray-200" id="recentActivity">
+                <li class="py-4">
+                    <div class="flex items-center space-x-4">
+                        <div class="flex-shrink-0">
+                            <i class="fas fa-circle-notch fa-spin text-gray-400"></i>
+                        </div>
+                        <div class="flex-1 min-w-0">
+                            <p class="text-sm text-gray-500">Loading recent activity...</p>
+                        </div>
+                    </div>
+                </li>
+            </ul>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_scripts %}
+<script>
+    // Initialize Socket.IO with auth token
+    const socket = initSocket('{{ session_token }}');
+    
+    // Request dashboard data when connected
+    socket.on('connect', () => {
+        console.log('Dashboard connected to gateway');
+        
+        // Request initial data
+        socket.emit('dashboard:subscribe', {
+            organizationId: '{{ user.organizationId }}'
+        });
+    });
+    
+    // Listen for dashboard stats updates
+    socket.on('dashboard:stats', (stats) => {
+        document.getElementById('activePatients').textContent = stats.activePatients || 0;
+        document.getElementById('appointmentsToday').textContent = stats.appointmentsToday || 0;
+        document.getElementById('pendingClaims').textContent = stats.pendingClaims || 0;
+        document.getElementById('completedToday').textContent = stats.completedToday || 0;
+    });
+    
+    // Listen for activity updates
+    socket.on('dashboard:activity', (activities) => {
+        const activityList = document.getElementById('recentActivity');
+        activityList.innerHTML = '';
+        
+        if (activities && activities.length > 0) {
+            activities.forEach(activity => {
+                const li = document.createElement('li');
+                li.className = 'py-4';
+                li.innerHTML = `
+                    <div class="flex items-center space-x-4">
+                        <div class="flex-shrink-0">
+                            <i class="fas ${getActivityIcon(activity.type)} text-${getActivityColor(activity.type)}-500"></i>
+                        </div>
+                        <div class="flex-1 min-w-0">
+                            <p class="text-sm font-medium text-gray-900 truncate">${activity.title}</p>
+                            <p class="text-sm text-gray-500 truncate">${activity.description}</p>
+                        </div>
+                        <div class="flex-shrink-0 text-sm text-gray-500">
+                            ${formatTime(activity.timestamp)}
+                        </div>
+                    </div>
+                `;
+                activityList.appendChild(li);
+            });
+        } else {
+            activityList.innerHTML = '<li class="py-4 text-center text-gray-500">No recent activity</li>';
+        }
+    });
+    
+    // Real-time stat updates
+    socket.on('dashboard:stat:update', (update) => {
+        if (update.activePatients !== undefined) {
+            document.getElementById('activePatients').textContent = update.activePatients;
+        }
+        if (update.appointmentsToday !== undefined) {
+            document.getElementById('appointmentsToday').textContent = update.appointmentsToday;
+        }
+        if (update.pendingClaims !== undefined) {
+            document.getElementById('pendingClaims').textContent = update.pendingClaims;
+        }
+        if (update.completedToday !== undefined) {
+            document.getElementById('completedToday').textContent = update.completedToday;
+        }
+    });
+    
+    // Real-time activity stream
+    socket.on('dashboard:activity:new', (activity) => {
+        const activityList = document.getElementById('recentActivity');
+        
+        // Remove "no activity" message if present
+        const noActivity = activityList.querySelector('.text-center.text-gray-500');
+        if (noActivity) {
+            noActivity.remove();
+        }
+        
+        // Create new activity item
+        const li = document.createElement('li');
+        li.className = 'py-4 bg-indigo-50 transition-colors duration-1000';
+        li.innerHTML = `
+            <div class="flex items-center space-x-4">
+                <div class="flex-shrink-0">
+                    <i class="fas ${getActivityIcon(activity.type)} text-${getActivityColor(activity.type)}-500"></i>
+                </div>
+                <div class="flex-1 min-w-0">
+                    <p class="text-sm font-medium text-gray-900 truncate">${activity.title}</p>
+                    <p class="text-sm text-gray-500 truncate">${activity.description}</p>
+                </div>
+                <div class="flex-shrink-0 text-sm text-gray-500">
+                    Just now
+                </div>
+            </div>
+        `;
+        
+        // Add to top of list
+        activityList.insertBefore(li, activityList.firstChild);
+        
+        // Remove highlight after animation
+        setTimeout(() => {
+            li.classList.remove('bg-indigo-50');
+        }, 1000);
+        
+        // Keep only last 10 activities
+        while (activityList.children.length > 10) {
+            activityList.removeChild(activityList.lastChild);
+        }
+    });
+    
+    function getActivityIcon(type) {
+        const icons = {
+            'appointment': 'fa-calendar-check',
+            'patient': 'fa-user-plus',
+            'claim': 'fa-file-medical',
+            'payment': 'fa-dollar-sign',
+            'message': 'fa-envelope',
+            'alert': 'fa-exclamation-triangle'
+        };
+        return icons[type] || 'fa-info-circle';
+    }
+    
+    function getActivityColor(type) {
+        const colors = {
+            'appointment': 'blue',
+            'patient': 'green',
+            'claim': 'yellow',
+            'payment': 'green',
+            'message': 'purple',
+            'alert': 'red'
+        };
+        return colors[type] || 'gray';
+    }
+    
+    function formatTime(timestamp) {
+        const date = new Date(timestamp);
+        const now = new Date();
+        const diff = now - date;
+        
+        if (diff < 60000) {
+            return 'Just now';
+        } else if (diff < 3600000) {
+            return `${Math.floor(diff / 60000)}m ago`;
+        } else if (diff < 86400000) {
+            return `${Math.floor(diff / 3600000)}h ago`;
+        } else {
+            return date.toLocaleDateString();
+        }
+    }
+    
+    // Handle disconnection
+    socket.on('disconnect', () => {
+        console.log('Dashboard disconnected from gateway');
+        // Show disconnected state in UI
+        document.querySelectorAll('[id$="Patients"], [id$="Today"], [id$="Claims"]').forEach(el => {
+            el.innerHTML = '<i class="fas fa-exclamation-circle text-red-400"></i>';
+        });
+    });
+    
+    // Handle reconnection
+    socket.on('reconnect', () => {
+        console.log('Dashboard reconnected to gateway');
+        // Re-subscribe to dashboard data
+        socket.emit('dashboard:subscribe', {
+            organizationId: '{{ user.organizationId }}'
+        });
+    });
+</script>
+{% endblock %}
