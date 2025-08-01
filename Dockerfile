@@ -21,5 +21,5 @@ USER appuser
 # Expose port
 EXPOSE 5000
 
-# Run with gunicorn
-CMD ["gunicorn", "--bind", "0.0.0.0:5000", "--workers", "4", "--threads", "2", "app:app"]
+# Run with gunicorn and eventlet for Socket.IO support
+CMD ["gunicorn", "--worker-class", "eventlet", "--bind", "0.0.0.0:5000", "--workers", "1", "app:app"]

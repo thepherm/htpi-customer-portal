@@ -103,8 +103,7 @@
 
 {% block extra_scripts %}
 <script>
-    // Initialize Socket.IO with auth token
-    const socket = initSocket('{{ session_token }}');
+    // Socket is already initialized in base template
     let allPatients = [];
     let searchTerm = '';
     
@@ -114,7 +113,7 @@
         
         // Subscribe to patient updates
         socket.emit('patients:subscribe', {
-            organizationId: '{{ user.organizationId }}'
+            tenantId: '{{ tenant.id }}'
         });
     });
     
@@ -270,7 +269,7 @@
         // Emit add patient event
         socket.emit('patients:add', {
             ...patientData,
-            organizationId: '{{ user.organizationId }}'
+            tenantId: '{{ tenant.id }}'
         });
         
         // Listen for response
@@ -306,7 +305,7 @@
         console.log('Patients page reconnected to gateway');
         // Re-subscribe to patient data
         socket.emit('patients:subscribe', {
-            organizationId: '{{ user.organizationId }}'
+            tenantId: '{{ tenant.id }}'
         });
     });
 </script>

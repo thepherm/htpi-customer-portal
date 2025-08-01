@@ -104,8 +104,7 @@
 
 {% block extra_scripts %}
 <script>
-    // Initialize Socket.IO with auth token
-    const socket = initSocket('{{ session_token }}');
+    // Socket is already initialized in base template
     
     // Request dashboard data when connected
     socket.on('connect', () => {
@@ -113,7 +112,7 @@
         
         // Request initial data
         socket.emit('dashboard:subscribe', {
-            organizationId: '{{ user.organizationId }}'
+            tenantId: '{{ tenant.id }}'
         });
     });
     
@@ -267,7 +266,7 @@
         console.log('Dashboard reconnected to gateway');
         // Re-subscribe to dashboard data
         socket.emit('dashboard:subscribe', {
-            organizationId: '{{ user.organizationId }}'
+            tenantId: '{{ tenant.id }}'
         });
     });
 </script>

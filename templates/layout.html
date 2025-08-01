@@ -20,6 +20,19 @@
                     </div>
                 </div>
                 <div class="flex items-center">
+                    {% if tenant %}
+                    <div class="mr-4">
+                        <button onclick="showTenantMenu()" class="flex items-center text-sm text-gray-700 hover:text-gray-900">
+                            <span class="font-medium">{{ tenant.name }}</span>
+                            <i class="fas fa-chevron-down ml-1"></i>
+                        </button>
+                        <div id="tenantMenu" class="hidden absolute right-0 mt-2 w-48 bg-white rounded-md shadow-lg py-1 z-50">
+                            <a href="/select-tenant" class="block px-4 py-2 text-sm text-gray-700 hover:bg-gray-100">
+                                <i class="fas fa-exchange-alt mr-2"></i>Switch Tenant
+                            </a>
+                        </div>
+                    </div>
+                    {% endif %}
                     <span class="text-gray-700 mr-4">{{ user.name if user else 'User' }}</span>
                     <a href="/logout" class="text-red-600 hover:text-red-800">
                         <i class="fas fa-sign-out-alt"></i> Logout
@@ -34,4 +47,20 @@
         {% block page_content %}{% endblock %}
     </main>
 </div>
+
+<script>
+    // Tenant menu functionality
+    function showTenantMenu() {
+        const menu = document.getElementById('tenantMenu');
+        menu.classList.toggle('hidden');
+    }
+    
+    // Close menu when clicking outside
+    document.addEventListener('click', (e) => {
+        const menu = document.getElementById('tenantMenu');
+        if (menu && !e.target.closest('button[onclick="showTenantMenu()"]') && !menu.contains(e.target)) {
+            menu.classList.add('hidden');
+        }
+    });
+</script>
 {% endblock %}

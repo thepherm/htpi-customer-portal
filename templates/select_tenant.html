@@ -1,0 +1,153 @@
+{% extends "base.html" %}
+
+{% block title %}Select Tenant - HTPI Customer Portal{% endblock %}
+
+{% block content %}
+<div class="min-h-screen flex items-center justify-center py-12 px-4 sm:px-6 lg:px-8">
+    <div class="max-w-md w-full space-y-8">
+        <div>
+            <h2 class="mt-6 text-center text-3xl font-extrabold text-gray-900">
+                Select Tenant
+            </h2>
+            <p class="mt-2 text-center text-sm text-gray-600">
+                Choose which organization to access
+            </p>
+        </div>
+        
+        <div class="mt-8 space-y-4" id="tenantList">
+            <div class="text-center">
+                <i class="fas fa-circle-notch fa-spin text-gray-400 text-2xl"></i>
+                <p class="mt-2 text-sm text-gray-500">Loading your tenants...</p>
+            </div>
+        </div>
+        
+        <div class="text-center">
+            <a href="/logout" class="text-sm text-gray-500 hover:text-gray-700">
+                Sign out
+            </a>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_scripts %}
+<script>
+    // Socket is already initialized in base template
+    let userTenants = [];
+    
+    // Request user's tenants when connected
+    socket.on('connect', () => {
+        console.log('Connected to gateway for tenant selection');
+        
+        // Request user's tenants
+        socket.emit('user:tenants:list');
+    });
+    
+    // Listen for tenant list
+    socket.on('user:tenants:list:response', (response) => {
+        if (response.tenants && response.tenants.length > 0) {
+            userTenants = response.tenants;
+            renderTenants();
+        } else {
+            document.getElementById('tenantList').innerHTML = `
+                <div class="text-center py-8">
+                    <i class="fas fa-building text-gray-300 text-5xl mb-4"></i>
+                    <p class="text-gray-500">You don't have access to any tenants yet.</p>
+                    <p class="text-sm text-gray-400 mt-2">Please contact your administrator.</p>
+                </div>
+            `;
+        }
+    });
+    
+    function renderTenants() {
+        const tenantList = document.getElementById('tenantList');
+        
+        tenantList.innerHTML = userTenants.map(tenant => `
+            <div class="bg-white rounded-lg shadow hover:shadow-md transition-shadow cursor-pointer" onclick="selectTenant('${tenant.id}', '${tenant.name}')">
+                <div class="px-6 py-4">
+                    <div class="flex items-center justify-between">
+                        <div>
+                            <h3 class="text-lg font-medium text-gray-900">${tenant.name}</h3>
+                            ${tenant.domain ? `<p class="text-sm text-gray-500">${tenant.domain}</p>` : ''}
+                        </div>
+                        <i class="fas fa-chevron-right text-gray-400"></i>
+                    </div>
+                    ${tenant.role ? `
+                        <div class="mt-2">
+                            <span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${tenant.role === 'admin' ? 'bg-purple-100 text-purple-800' : 'bg-gray-100 text-gray-800'}">
+                                ${tenant.role}
+                            </span>
+                        </div>
+                    ` : ''}
+                </div>
+            </div>
+        `).join('');
+        
+        // If only one tenant, auto-select it
+        if (userTenants.length === 1) {
+            setTimeout(() => {
+                selectTenant(userTenants[0].id, userTenants[0].name);
+            }, 500);
+        }
+    }
+    
+    async function selectTenant(tenantId, tenantName) {
+        // Show loading state
+        const tenantDiv = event.currentTarget;
+        if (tenantDiv) {
+            tenantDiv.classList.add('opacity-50');
+            tenantDiv.style.pointerEvents = 'none';
+        }
+        
+        try {
+            // Update session with selected tenant
+            const response = await fetch('/auth/session', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({
+                    authenticated: true,
+                    user: {{ user | tojson }},
+                    token: '{{ session_token }}',
+                    current_tenant: {
+                        id: tenantId,
+                        name: tenantName
+                    }
+                }),
+                credentials: 'same-origin'
+            });
+            
+            if (response.ok) {
+                // Emit tenant selection event
+                socket.emit('user:tenant:select', { tenantId });
+                
+                // Redirect to dashboard
+                window.location.href = '/dashboard';
+            } else {
+                throw new Error('Failed to select tenant');
+            }
+        } catch (error) {
+            console.error('Error selecting tenant:', error);
+            alert('Failed to select tenant. Please try again.');
+            
+            // Reset loading state
+            if (tenantDiv) {
+                tenantDiv.classList.remove('opacity-50');
+                tenantDiv.style.pointerEvents = 'auto';
+            }
+        }
+    }
+    
+    // Handle connection errors
+    socket.on('connect_error', (error) => {
+        document.getElementById('tenantList').innerHTML = `
+            <div class="text-center py-8">
+                <i class="fas fa-exclamation-circle text-red-400 text-5xl mb-4"></i>
+                <p class="text-red-600">Cannot connect to server</p>
+                <p class="text-sm text-gray-400 mt-2">Please try again later.</p>
+            </div>
+        `;
+    });
+</script>
+{% endblock %}
