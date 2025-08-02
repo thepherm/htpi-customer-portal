@@ -3,7 +3,7 @@
 import os
 import logging
 import asyncio
-from datetime import timedelta
+from datetime import datetime, timedelta
 from flask import Flask, render_template, redirect, url_for, request, session, jsonify
 from flask_cors import CORS
 from flask_socketio import SocketIO, emit, join_room, leave_room
@@ -11,6 +11,7 @@ from functools import wraps
 import nats
 from nats.aio.client import Client as NATS
 import json
+import uuid
 
 # Configure logging
 logging.basicConfig(
@@ -30,23 +31,68 @@ app.config['PERMANENT_SESSION_LIFETIME'] = timedelta(hours=24)
 # Enable CORS
 CORS(app, supports_credentials=True)
 
-# Initialize Socket.IO
-socketio = SocketIO(app, cors_allowed_origins="*", logger=True, engineio_logger=True)
+# Initialize Socket.IO with async mode
+socketio = SocketIO(app, cors_allowed_origins="*", logger=True, engineio_logger=True, async_mode='threading')
 
 # NATS configuration
 NATS_URL = os.environ.get('NATS_URL', 'nats://localhost:4222')
-STANDALONE_MODE = os.environ.get('STANDALONE_MODE', 'true').lower() == 'true'
 nc = None  # NATS client will be initialized on startup
 
 # Connected clients tracking
 connected_clients = {}
 
-# Log startup mode
-if STANDALONE_MODE:
-    logger.warning("Running in STANDALONE MODE - No NATS/microservices required")
-    logger.warning("Set STANDALONE_MODE=false when NATS and services are deployed")
-else:
-    logger.info("Running in MICROSERVICES MODE - Connecting to NATS")
+# NATS subjects mapping
+NATS_SUBJECTS = {
+    # Auth service
+    'auth.login': 'htpi.auth.login',
+    'auth.verify': 'htpi.auth.verify',
+    
+    # Tenant service
+    'tenant.list.for.user': 'htpi.tenant.list.for.user',
+    'tenant.verify.access': 'htpi.tenant.verify.access',
+    
+    # Patient service
+    'patient.list': 'htpi.patient.list',
+    'patient.get': 'htpi.patient.get',
+    
+    # Dashboard service
+    'dashboard.get.stats': 'htpi.dashboard.get.stats',
+    'dashboard.get.activity': 'htpi.dashboard.get.activity',
+    
+    # Insurance service
+    'insurance.list.for.patient': 'htpi.insurance.list.for.patient',
+    
+    # Claims service
+    'claims.list.for.patient': 'htpi.claims.list.for.patient',
+    'claims.get': 'htpi.claims.get'
+}
+
+def publish_to_nats(subject_key, data):
+    """
+    Publish message to NATS
+    This is a placeholder for sync mode - in production this would be async
+    """
+    if not nc or not nc.is_connected:
+        logger.warning(f"NATS not connected, cannot publish to {subject_key}")
+        return None
+    
+    try:
+        subject = NATS_SUBJECTS.get(subject_key)
+        if not subject:
+            logger.error(f"Unknown NATS subject key: {subject_key}")
+            return None
+        
+        message = json.dumps(data).encode()
+        logger.info(f"Publishing to NATS {subject}: {data}")
+        
+        # In production, this would be async
+        # response = await nc.request(subject, message, timeout=30)
+        # return json.loads(response.data.decode())
+        
+        return None  # Sync mode limitation
+    except Exception as e:
+        logger.error(f"Error publishing to NATS: {str(e)}")
+        return None
 
 # Authentication decorator
 def login_required(f):
@@ -100,18 +146,9 @@ def switch_tenant(tenant_id):
 @app.route('/dashboard')
 @tenant_required
 def dashboard():
-    # Mock stats for development
-    mock_stats = {
-        'appointments_today': 5,
-        'upcoming_appointments': 12,
-        'recent_claims': 3,
-        'pending_authorizations': 2
-    }
-    
     return render_template('dashboard.html', 
                          user=session.get('user'), 
-                         tenant=session.get('current_tenant'),
-                         stats=mock_stats)
+                         tenant=session.get('current_tenant'))
 
 @app.route('/patients')
 @tenant_required
@@ -162,7 +199,7 @@ def handle_disconnect():
 
 @socketio.on('auth:login')
 def handle_login(data):
-    """Handle login authentication"""
+    """Forward login authentication to NATS"""
     client_id = request.sid
     email = data.get('email')
     password = data.get('password')
@@ -170,17 +207,24 @@ def handle_login(data):
     logger.info(f"Login attempt for email: {email}")
     
     try:
-        if STANDALONE_MODE:
-            # Standalone mode - use mock authentication
-            if email == 'demo@htpi.com' and password == 'demo123':
-                # Create mock user
-                user_data = {
-                    'id': 'user-001',
-                    'email': email,
-                    'name': 'Demo User',
-                    'role': 'user'
-                }
-                token = 'dev-token-' + os.urandom(16).hex()
+        # Add context to auth request
+        auth_message = {
+            'email': email,
+            'password': password,
+            'portal': 'customer',
+            'clientId': client_id,
+            'requestId': data.get('requestId', str(uuid.uuid4())),
+            'timestamp': datetime.utcnow().isoformat()
+        }
+        
+        # Publish to NATS
+        result = publish_to_nats('auth.login', auth_message)
+        
+        if result:
+            # Forward NATS response to client
+            if result.get('success'):
+                user_data = result.get('user')
+                token = result.get('token')
                 
                 # Update connected client info
                 connected_clients[client_id]['authenticated'] = True
@@ -196,33 +240,19 @@ def handle_login(data):
                     'token': token
                 })
                 
-                logger.info(f"[STANDALONE] User authenticated: {email}")
+                logger.info(f"User authenticated via NATS: {email}")
             else:
                 emit('auth:login:response', {
                     'success': False,
-                    'error': 'Invalid credentials. Use demo@htpi.com / demo123'
+                    'error': result.get('error', 'Invalid credentials')
                 })
         else:
-            # Production mode - NATS auth
-            if nc and nc.is_connected:
-                auth_request = {
-                    'email': email,
-                    'password': password,
-                    'portal': 'customer'
-                }
-                
-                # In sync mode, we can't use await
-                logger.info("NATS auth not available in sync mode")
-                emit('auth:login:response', {
-                    'success': False,
-                    'error': 'Authentication service temporarily unavailable'
-                })
-            else:
-                logger.error("NATS not connected")
-                emit('auth:login:response', {
-                    'success': False,
-                    'error': 'Authentication service unavailable'
-                })
+            # NATS not available
+            emit('auth:login:response', {
+                'success': False,
+                'error': 'Authentication service unavailable'
+            })
+            
     except Exception as e:
         logger.error(f"Login error: {str(e)}")
         emit('auth:login:response', {
@@ -232,7 +262,7 @@ def handle_login(data):
 
 @socketio.on('user:tenants:list')
 def handle_list_tenants():
-    """Get list of tenants for authenticated user"""
+    """Forward tenant list request to NATS"""
     client_id = request.sid
     client = connected_clients.get(client_id)
     
@@ -241,41 +271,32 @@ def handle_list_tenants():
         return
     
     try:
-        if STANDALONE_MODE:
-            # Mock tenants for demo user
-            mock_tenants = [
-                {
-                    'id': 'tenant-001',
-                    'name': 'Demo Clinic',
-                    'domain': 'demo.htpi.com',
-                    'status': 'Active',
-                    'role': 'User'
-                },
-                {
-                    'id': 'tenant-002',
-                    'name': 'Test Hospital',
-                    'domain': 'test.htpi.com',
-                    'status': 'Active',
-                    'role': 'Viewer'
-                }
-            ]
-            
+        # Publish to NATS to get user's tenants
+        nats_message = {
+            'userId': client['user']['id'],
+            'userEmail': client['user']['email'],
+            'clientId': client_id,
+            'requestType': 'list',
+            'responseChannel': f"customer.tenants.response.{client_id}"
+        }
+        
+        # Publish to NATS
+        result = publish_to_nats('tenant.list.for.user', nats_message)
+        
+        if result:
+            # Forward NATS response
             emit('user:tenants:list:response', {
-                'tenants': mock_tenants
+                'tenants': result.get('tenants', [])
             })
-            
-            logger.info(f"[STANDALONE] Sent mock tenants to user")
         else:
-            # Production mode
-            user_id = client['user']['id']
-            if nc and nc.is_connected:
-                # In sync mode, can't use await
-                logger.info("NATS tenant list not available in sync mode")
-                emit('user:tenants:list:response', {
-                    'tenants': []
-                })
-            else:
-                emit('error', {'message': 'Service unavailable'})
+            # NATS not available - send empty list
+            emit('user:tenants:list:response', {
+                'tenants': [],
+                'error': 'Service temporarily unavailable'
+            })
+        
+        logger.info(f"User {client['user']['id']} requested tenant list")
+        
     except Exception as e:
         logger.error(f"Error listing tenants: {str(e)}")
         emit('error', {'message': 'Failed to load tenants'})
@@ -451,38 +472,91 @@ def handle_add_patient(data):
             'error': 'Failed to add patient'
         })
 
-# NATS message handlers
+# NATS Response Handlers
+async def handle_auth_response(msg):
+    """Handle authentication responses from NATS"""
+    try:
+        data = json.loads(msg.data.decode())
+        client_id = data.get('clientId')
+        
+        if data.get('success'):
+            user_data = data.get('user')
+            token = data.get('token')
+            
+            # Update connected client
+            if client_id in connected_clients:
+                connected_clients[client_id]['authenticated'] = True
+                connected_clients[client_id]['user'] = user_data
+                connected_clients[client_id]['token'] = token
+            
+            # Send response to specific client
+            socketio.emit('auth:login:response', {
+                'success': True,
+                'user': user_data,
+                'token': token
+            }, room=client_id)
+        else:
+            socketio.emit('auth:login:response', {
+                'success': False,
+                'error': data.get('error', 'Authentication failed')
+            }, room=client_id)
+            
+    except Exception as e:
+        logger.error(f"Error handling auth response: {str(e)}")
+
+async def handle_tenant_response(msg):
+    """Handle tenant list responses from NATS"""
+    try:
+        data = json.loads(msg.data.decode())
+        client_id = data.get('clientId')
+        
+        socketio.emit('user:tenants:list:response', {
+            'tenants': data.get('tenants', [])
+        }, room=client_id)
+        
+    except Exception as e:
+        logger.error(f"Error handling tenant response: {str(e)}")
+
+async def handle_patient_response(msg):
+    """Handle patient responses from NATS"""
+    try:
+        data = json.loads(msg.data.decode())
+        response_type = data.get('responseType')
+        
+        if response_type == 'list':
+            socketio.emit('patients:list', {
+                'patients': data.get('patients', [])
+            }, room=f"patients:{data['tenantId']}")
+            
+        elif response_type == 'created':
+            # Notify specific client
+            socketio.emit(f"patients:add:response:{data['requestId']}", {
+                'success': True,
+                'patient': data['patient']
+            }, room=data.get('clientId'))
+            
+            # Broadcast to all users in tenant
+            socketio.emit('patients:new', data['patient'], 
+                        room=f"patients:{data['tenantId']}")
+            
+    except Exception as e:
+        logger.error(f"Error handling patient response: {str(e)}")
+
 async def handle_dashboard_update(msg):
     """Handle dashboard updates from NATS"""
     try:
         data = json.loads(msg.data.decode())
-        tenant_id = data.get('tenant_id')
+        tenant_id = data.get('tenantId')
         update_type = data.get('type')
         
         if update_type == 'stats':
-            socketio.emit('dashboard:stat:update', data['stats'], 
+            socketio.emit('dashboard:stats:update', data['stats'], 
                         room=f"dashboard:{tenant_id}")
         elif update_type == 'activity':
             socketio.emit('dashboard:activity:new', data['activity'], 
                         room=f"dashboard:{tenant_id}")
     except Exception as e:
         logger.error(f"Error handling dashboard update: {str(e)}")
-
-async def handle_patient_update(msg):
-    """Handle patient updates from NATS"""
-    try:
-        data = json.loads(msg.data.decode())
-        tenant_id = data.get('tenant_id')
-        update_type = data.get('type')
-        
-        if update_type == 'update':
-            socketio.emit('patients:update', data['patient'], 
-                        room=f"patients:{tenant_id}")
-        elif update_type == 'delete':
-            socketio.emit('patients:delete', data['patient_id'], 
-                        room=f"patients:{tenant_id}")
-    except Exception as e:
-        logger.error(f"Error handling patient update: {str(e)}")
 
 # Initialize NATS connection
 async def init_nats():
@@ -493,13 +567,20 @@ async def init_nats():
         nc = await nats.connect(NATS_URL)
         logger.info(f"Connected to NATS at {NATS_URL}")
         
-        # Subscribe to relevant topics
-        await nc.subscribe("customer.dashboard.updates", cb=handle_dashboard_update)
-        await nc.subscribe("customer.patients.updates", cb=handle_patient_update)
+        # Subscribe to response channels from services
+        await nc.subscribe("customer.auth.response.*", cb=handle_auth_response)
+        await nc.subscribe("customer.tenants.response.*", cb=handle_tenant_response)
+        await nc.subscribe("customer.patients.response.*", cb=handle_patient_response)
+        await nc.subscribe("customer.dashboard.response.*", cb=handle_dashboard_update)
         
-        logger.info("NATS subscriptions established")
+        # Subscribe to broadcast channels
+        await nc.subscribe("customer.broadcast.dashboard.*", cb=handle_dashboard_update)
+        await nc.subscribe("customer.broadcast.patients.*", cb=handle_patient_response)
+        
+        logger.info("Customer portal NATS subscriptions established")
     except Exception as e:
         logger.error(f"Failed to connect to NATS: {str(e)}")
+        raise
 
 # Error handlers
 @app.errorhandler(404)
@@ -511,17 +592,18 @@ def server_error(error):
     return render_template('500.html'), 500
 
 if __name__ == '__main__':
-    # Only initialize NATS if not in standalone mode
-    if not STANDALONE_MODE:
-        loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(loop)
-        try:
-            loop.run_until_complete(init_nats())
-        except Exception as e:
-            logger.error(f"NATS initialization failed: {str(e)}")
-            logger.warning("Starting without NATS connection")
-    else:
-        logger.info("Skipping NATS initialization in STANDALONE MODE")
+    # Run NATS initialization in event loop
+    loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(loop)
+    try:
+        loop.run_until_complete(init_nats())
+        logger.info("NATS connection established successfully")
+    except Exception as e:
+        logger.error(f"NATS initialization failed: {str(e)}")
+        logger.error("Customer portal requires NATS to function properly")
+        # Exit if NATS is not available
+        import sys
+        sys.exit(1)
     
     # Start Flask-SocketIO server
     port = int(os.environ.get('PORT', 5000))

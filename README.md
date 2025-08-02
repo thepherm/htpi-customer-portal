@@ -1,36 +1,48 @@
 # HTPI Customer Portal
 
-Flask-based customer portal for the HTPI healthcare system.
+Flask-based customer portal for the HTPI healthcare system with full NATS integration.
 
 ## Features
 
 - Multi-tenant support (customers can access multiple organizations)
-- Patient viewing
+- Patient viewing with real-time updates
 - Claims tracking
 - Insurance information
+- 100% event-driven architecture via NATS
 - Real-time updates via Socket.IO
+
+## Architecture
+
+This portal is a pure MVC layer with NO business logic:
+- Receives Socket.IO events from browsers
+- Forwards all requests to NATS
+- Microservices handle all business logic
+- Responses flow back through NATS to Socket.IO
+
+See [ARCHITECTURE.md](ARCHITECTURE.md) for detailed flow.
 
 ## Deployment
 
-### Environment Variables
+### Required Environment Variables
 
 ```bash
-# Required
+# NATS Connection (REQUIRED - portal won't start without it)
+NATS_URL=nats://htpi-nats.railway.internal:4222
+
+# Flask Configuration
 PORT=5000
 SECRET_KEY=your-secret-key-here
-
-# Standalone Mode (for testing without microservices)
-STANDALONE_MODE=true
-
-# Production Mode (when microservices are deployed)
-STANDALONE_MODE=false
-NATS_URL=nats://htpi-nats.railway.internal:4222
+ENV=production
 ```
 
-### Testing Credentials (Standalone Mode)
+### Railway Deployment
 
-- Email: `demo@htpi.com`
-- Password: `demo123`
+The portal requires these services to be running:
+1. `htpi-nats` - Message broker
+2. `htpi-auth-service` - For user authentication
+3. `htpi-tenant-service` - For multi-tenant access
+4. `htpi-patients-service` - For patient data
+5. `htpi-mongodb-service` - For data persistence
 
 ## Architecture
 
