@@ -35,10 +35,18 @@ socketio = SocketIO(app, cors_allowed_origins="*", logger=True, engineio_logger=
 
 # NATS configuration
 NATS_URL = os.environ.get('NATS_URL', 'nats://localhost:4222')
+STANDALONE_MODE = os.environ.get('STANDALONE_MODE', 'true').lower() == 'true'
 nc = None  # NATS client will be initialized on startup
 
 # Connected clients tracking
 connected_clients = {}
+
+# Log startup mode
+if STANDALONE_MODE:
+    logger.warning("Running in STANDALONE MODE - No NATS/microservices required")
+    logger.warning("Set STANDALONE_MODE=false when NATS and services are deployed")
+else:
+    logger.info("Running in MICROSERVICES MODE - Connecting to NATS")
 
 # Authentication decorator
 def login_required(f):
@@ -92,9 +100,18 @@ def switch_tenant(tenant_id):
 @app.route('/dashboard')
 @tenant_required
 def dashboard():
+    # Mock stats for development
+    mock_stats = {
+        'appointments_today': 5,
+        'upcoming_appointments': 12,
+        'recent_claims': 3,
+        'pending_authorizations': 2
+    }
+    
     return render_template('dashboard.html', 
                          user=session.get('user'), 
-                         tenant=session.get('current_tenant'))
+                         tenant=session.get('current_tenant'),
+                         stats=mock_stats)
 
 @app.route('/patients')
 @tenant_required
@@ -144,7 +161,7 @@ def handle_disconnect():
         del connected_clients[client_id]
 
 @socketio.on('auth:login')
-async def handle_login(data):
+def handle_login(data):
     """Handle login authentication"""
     client_id = request.sid
     email = data.get('email')
@@ -153,21 +170,17 @@ async def handle_login(data):
     logger.info(f"Login attempt for email: {email}")
     
     try:
-        # Send authentication request to auth service via NATS
-        if nc and nc.is_connected:
-            auth_request = {
-                'email': email,
-                'password': password,
-                'portal': 'customer'
-            }
-            
-            # Request-reply pattern with NATS
-            response = await nc.request('auth.login', json.dumps(auth_request).encode(), timeout=5)
-            auth_result = json.loads(response.data.decode())
-            
-            if auth_result.get('success'):
-                user_data = auth_result.get('user')
-                token = auth_result.get('token')
+        if STANDALONE_MODE:
+            # Standalone mode - use mock authentication
+            if email == 'demo@htpi.com' and password == 'demo123':
+                # Create mock user
+                user_data = {
+                    'id': 'user-001',
+                    'email': email,
+                    'name': 'Demo User',
+                    'role': 'user'
+                }
+                token = 'dev-token-' + os.urandom(16).hex()
                 
                 # Update connected client info
                 connected_clients[client_id]['authenticated'] = True
@@ -183,19 +196,33 @@ async def handle_login(data):
                     'token': token
                 })
                 
-                logger.info(f"User authenticated: {email}")
+                logger.info(f"[STANDALONE] User authenticated: {email}")
             else:
                 emit('auth:login:response', {
                     'success': False,
-                    'error': auth_result.get('error', 'Invalid credentials')
+                    'error': 'Invalid credentials. Use demo@htpi.com / demo123'
                 })
-                logger.warning(f"Failed login attempt for: {email}")
         else:
-            logger.error("NATS not connected")
-            emit('auth:login:response', {
-                'success': False,
-                'error': 'Authentication service unavailable'
-            })
+            # Production mode - NATS auth
+            if nc and nc.is_connected:
+                auth_request = {
+                    'email': email,
+                    'password': password,
+                    'portal': 'customer'
+                }
+                
+                # In sync mode, we can't use await
+                logger.info("NATS auth not available in sync mode")
+                emit('auth:login:response', {
+                    'success': False,
+                    'error': 'Authentication service temporarily unavailable'
+                })
+            else:
+                logger.error("NATS not connected")
+                emit('auth:login:response', {
+                    'success': False,
+                    'error': 'Authentication service unavailable'
+                })
     except Exception as e:
         logger.error(f"Login error: {str(e)}")
         emit('auth:login:response', {
@@ -204,7 +231,7 @@ async def handle_login(data):
         })
 
 @socketio.on('user:tenants:list')
-async def handle_list_tenants():
+def handle_list_tenants():
     """Get list of tenants for authenticated user"""
     client_id = request.sid
     client = connected_clients.get(client_id)
@@ -214,26 +241,47 @@ async def handle_list_tenants():
         return
     
     try:
-        user_id = client['user']['id']
-        
-        # Request user's tenants from service via NATS
-        if nc and nc.is_connected:
-            response = await nc.request('tenants.list_for_user', 
-                                      json.dumps({'user_id': user_id}).encode(), 
-                                      timeout=5)
-            tenants = json.loads(response.data.decode())
+        if STANDALONE_MODE:
+            # Mock tenants for demo user
+            mock_tenants = [
+                {
+                    'id': 'tenant-001',
+                    'name': 'Demo Clinic',
+                    'domain': 'demo.htpi.com',
+                    'status': 'Active',
+                    'role': 'User'
+                },
+                {
+                    'id': 'tenant-002',
+                    'name': 'Test Hospital',
+                    'domain': 'test.htpi.com',
+                    'status': 'Active',
+                    'role': 'Viewer'
+                }
+            ]
             
             emit('user:tenants:list:response', {
-                'tenants': tenants.get('tenants', [])
+                'tenants': mock_tenants
             })
+            
+            logger.info(f"[STANDALONE] Sent mock tenants to user")
         else:
-            emit('error', {'message': 'Service unavailable'})
+            # Production mode
+            user_id = client['user']['id']
+            if nc and nc.is_connected:
+                # In sync mode, can't use await
+                logger.info("NATS tenant list not available in sync mode")
+                emit('user:tenants:list:response', {
+                    'tenants': []
+                })
+            else:
+                emit('error', {'message': 'Service unavailable'})
     except Exception as e:
         logger.error(f"Error listing tenants: {str(e)}")
         emit('error', {'message': 'Failed to load tenants'})
 
 @socketio.on('user:tenant:select')
-async def handle_select_tenant(data):
+def handle_select_tenant(data):
     """Handle tenant selection"""
     client_id = request.sid
     client = connected_clients.get(client_id)
@@ -280,7 +328,7 @@ async def handle_select_tenant(data):
         })
 
 @socketio.on('dashboard:subscribe')
-async def handle_dashboard_subscribe(data):
+def handle_dashboard_subscribe(data):
     """Subscribe to dashboard updates for a tenant"""
     client_id = request.sid
     client = connected_clients.get(client_id)
@@ -323,7 +371,7 @@ async def handle_dashboard_subscribe(data):
         emit('error', {'message': 'Failed to load dashboard data'})
 
 @socketio.on('patients:subscribe')
-async def handle_patients_subscribe(data):
+def handle_patients_subscribe(data):
     """Subscribe to patient updates for a tenant"""
     client_id = request.sid
     client = connected_clients.get(client_id)
@@ -358,7 +406,7 @@ async def handle_patients_subscribe(data):
         emit('error', {'message': 'Failed to load patients'})
 
 @socketio.on('patients:add')
-async def handle_add_patient(data):
+def handle_add_patient(data):
     """Add a new patient"""
     client_id = request.sid
     client = connected_clients.get(client_id)
@@ -463,12 +511,20 @@ def server_error(error):
     return render_template('500.html'), 500
 
 if __name__ == '__main__':
-    # Run NATS initialization in event loop
-    loop = asyncio.new_event_loop()
-    asyncio.set_event_loop(loop)
-    loop.run_until_complete(init_nats())
+    # Only initialize NATS if not in standalone mode
+    if not STANDALONE_MODE:
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        try:
+            loop.run_until_complete(init_nats())
+        except Exception as e:
+            logger.error(f"NATS initialization failed: {str(e)}")
+            logger.warning("Starting without NATS connection")
+    else:
+        logger.info("Skipping NATS initialization in STANDALONE MODE")
     
     # Start Flask-SocketIO server
     port = int(os.environ.get('PORT', 5000))
+    logger.info(f"Starting customer portal on port {port}")
     socketio.run(app, host='0.0.0.0', port=port, 
                  debug=os.environ.get('ENV') != 'production')
